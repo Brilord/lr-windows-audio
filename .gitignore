@@ -1,0 +1,43 @@
+# Build output
+bin/
+obj/
+out/
+publish/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# .NET
+TestResults/
+*.nupkg
+*.snupkg
+project.lock.json
+project.assets.json
+
+# Logs
+*.log
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Local app settings and generated packages
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle

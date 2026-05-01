@@ -1,0 +1,14 @@
+<Application x:Class="BalanceDock.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Startup="OnStartup"
+             Exit="OnExit"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#101418" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#182028" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F4F7FA" />
+        <SolidColorBrush x:Key="SubtleTextBrush" Color="#AAB4BE" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#4DB6AC" />
+    </Application.Resources>
+</Application>
