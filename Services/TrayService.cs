@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.IO;
 using System.Windows;
 using Forms = System.Windows.Forms;
 
@@ -40,7 +41,7 @@ public sealed class TrayService : IDisposable
 
         _notifyIcon = new Forms.NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = LoadIcon(),
             Text = "BalanceDock",
             ContextMenuStrip = menu,
             Visible = true
@@ -105,9 +106,18 @@ public sealed class TrayService : IDisposable
 
     private void Exit()
     {
-        _notifyIcon.Visible = false;
-        _mainWindow.AllowClose = true;
-        System.Windows.Application.Current.Shutdown();
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        {
+            _notifyIcon.Visible = false;
+            _mainWindow.AllowClose = true;
+            System.Windows.Application.Current.Shutdown();
+        });
+    }
+
+    private static Icon LoadIcon()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Assets", "BalanceDock.ico");
+        return File.Exists(path) ? new Icon(path) : SystemIcons.Application;
     }
 
     public void Dispose()

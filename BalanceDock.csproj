@@ -8,10 +8,30 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <ApplicationIcon>Assets\BalanceDock.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>BalanceDock</AssemblyName>
+    <RootNamespace>BalanceDock</RootNamespace>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <Product>BalanceDock</Product>
+    <Title>BalanceDock</Title>
+    <Description>Windows left/right audio balance tray utility</Description>
+    <Company>BalanceDock</Company>
+    <Authors>BalanceDock</Authors>
+    <Copyright>Copyright © BalanceDock</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\BalanceDock.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

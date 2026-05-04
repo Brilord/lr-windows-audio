@@ -37,6 +37,9 @@ public sealed class SettingsService
             Current = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             Current.Balance = Math.Clamp(Current.Balance, -100, 100);
             Current.HotkeyStep = Math.Clamp(Current.HotkeyStep, 1, 25);
+            Current.ShiftLeftHotkey = HotkeyService.IsSupportedHotkey(Current.ShiftLeftHotkey) ? Current.ShiftLeftHotkey : "Ctrl+Alt+Left";
+            Current.ShiftRightHotkey = HotkeyService.IsSupportedHotkey(Current.ShiftRightHotkey) ? Current.ShiftRightHotkey : "Ctrl+Alt+Right";
+            Current.ResetHotkey = HotkeyService.IsSupportedHotkey(Current.ResetHotkey) ? Current.ResetHotkey : "Ctrl+Alt+Down";
         }
         catch
         {

@@ -13,15 +13,19 @@ public sealed class BalanceService : IDisposable
 
     private readonly AudioDeviceService _audioDeviceService;
     private readonly SettingsService _settingsService;
+    private readonly LogService _logService;
     private readonly System.Threading.Timer _sessionFallbackTimer;
     private readonly object _syncRoot = new();
+    private MMDevice? _fallbackDevice;
+    private AudioSessionManager.SessionCreatedDelegate? _sessionCreatedHandler;
     private bool _sessionFallbackActive;
     private bool _disposed;
 
-    public BalanceService(AudioDeviceService audioDeviceService, SettingsService settingsService)
+    public BalanceService(AudioDeviceService audioDeviceService, SettingsService settingsService, LogService logService)
     {
         _audioDeviceService = audioDeviceService;
         _settingsService = settingsService;
+        _logService = logService;
         _sessionFallbackTimer = new System.Threading.Timer(_ => ReapplySessionFallback(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
@@ -35,6 +39,50 @@ public sealed class BalanceService : IDisposable
     {
         balance = Math.Clamp(balance, -100, 100);
         return ((100 - balance) / 2, (100 + balance) / 2);
+    }
+
+    public AudioDiagnostics GetDiagnostics()
+    {
+        try
+        {
+            using var device = _audioDeviceService.GetDefaultOutputDevice();
+            if (device is null)
+            {
+                return AudioDiagnostics.NoDevice;
+            }
+
+            var endpointChannels = device.AudioEndpointVolume.Channels.Count;
+            var sessions = device.AudioSessionManager.Sessions;
+            var activeSessionCount = 0;
+            var controllableSessionCount = 0;
+
+            for (var i = 0; i < sessions.Count; i++)
+            {
+                var session = sessions[i];
+                if (session.State == AudioSessionState.AudioSessionStateActive)
+                {
+                    activeSessionCount++;
+                }
+
+                if (CanControlSessionChannels(session))
+                {
+                    controllableSessionCount++;
+                }
+            }
+
+            return new AudioDiagnostics(
+                device.FriendlyName,
+                endpointChannels,
+                endpointChannels >= 2,
+                activeSessionCount,
+                controllableSessionCount,
+                controllableSessionCount > 0);
+        }
+        catch (Exception ex)
+        {
+            _logService.Error("Failed to read audio diagnostics.", ex);
+            return AudioDiagnostics.NoDevice;
+        }
     }
 
     public bool ApplySavedBalance() => SetBalance(_settingsService.Current.Balance, persist: false);
@@ -71,11 +119,10 @@ public sealed class BalanceService : IDisposable
             {
                 ApplyEndpointBalance(endpointVolume, balance);
                 applied = true;
-                _sessionFallbackActive = false;
-                _sessionFallbackTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                StopSessionFallback();
                 if (raiseEvents)
                 {
-                    StatusChanged?.Invoke(this, "System endpoint balance applied.");
+                    StatusChanged?.Invoke(this, "Device balance active");
                 }
             }
             else
@@ -84,26 +131,26 @@ public sealed class BalanceService : IDisposable
                 if (sessionsUpdated > 0 || balance == 0)
                 {
                     applied = true;
-                    _sessionFallbackActive = balance != 0;
-                    if (_sessionFallbackActive)
+                    if (balance != 0)
                     {
-                        _sessionFallbackTimer.Change(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+                        _sessionFallbackActive = true;
+                        StartSessionFallbackMonitor(balance);
                     }
                     else
                     {
-                        _sessionFallbackTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                        StopSessionFallback();
                     }
 
                     if (raiseEvents)
                     {
-                        StatusChanged?.Invoke(this, $"Endpoint channel balance is unavailable. Applied per-app fallback to {sessionsUpdated} audio session(s).");
+                        StatusChanged?.Invoke(this, $"Per-app fallback active. {sessionsUpdated} session(s) adjusted.");
                     }
                 }
             }
 
             if (!applied)
             {
-                ReportError("This output device does not expose endpoint balance, and no controllable app audio sessions were found yet. Start audio playback and try again.");
+                ReportError("No controllable audio sessions found. Start playback and press Retry.");
                 return false;
             }
 
@@ -118,6 +165,7 @@ public sealed class BalanceService : IDisposable
         }
         catch (Exception ex)
         {
+            _logService.Error("Balance apply failed.", ex);
             ReportError($"Windows audio API access failed: {ex.Message}");
             return false;
         }
@@ -141,14 +189,58 @@ public sealed class BalanceService : IDisposable
 
         for (var i = 0; i < sessions.Count; i++)
         {
-            var session = sessions[i];
-            if (TryApplySessionChannelBalance(session, leftScalar, rightScalar))
+            if (TryApplySessionChannelBalance(sessions[i], leftScalar, rightScalar))
             {
                 updated++;
             }
         }
 
         return updated;
+    }
+
+    private static bool CanControlSessionChannels(AudioSessionControl session)
+    {
+        if (AudioSessionControlField?.GetValue(session) is not object rawSessionControl)
+        {
+            return false;
+        }
+
+        return CanControlSessionChannels(rawSessionControl);
+    }
+
+    private static bool CanControlSessionChannels(object rawSessionControl)
+    {
+        var unknown = IntPtr.Zero;
+        var channelVolumePointer = IntPtr.Zero;
+
+        try
+        {
+            unknown = Marshal.GetIUnknownForObject(rawSessionControl);
+            var iid = typeof(IChannelAudioVolume).GUID;
+            if (Marshal.QueryInterface(unknown, ref iid, out channelVolumePointer) != 0 || channelVolumePointer == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var channelVolume = (IChannelAudioVolume)Marshal.GetObjectForIUnknown(channelVolumePointer);
+            return channelVolume.GetChannelCount(out var channelCount) == 0 && channelCount >= 2;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (channelVolumePointer != IntPtr.Zero)
+            {
+                Marshal.Release(channelVolumePointer);
+            }
+
+            if (unknown != IntPtr.Zero)
+            {
+                Marshal.Release(unknown);
+            }
+        }
     }
 
     private static bool TryApplySessionChannelBalance(AudioSessionControl session, float leftScalar, float rightScalar)
@@ -158,6 +250,11 @@ public sealed class BalanceService : IDisposable
             return false;
         }
 
+        return TryApplySessionChannelBalance(rawSessionControl, leftScalar, rightScalar);
+    }
+
+    private static bool TryApplySessionChannelBalance(object rawSessionControl, float leftScalar, float rightScalar)
+    {
         var unknown = IntPtr.Zero;
         var channelVolumePointer = IntPtr.Zero;
 
@@ -205,6 +302,56 @@ public sealed class BalanceService : IDisposable
         }
     }
 
+    private void StartSessionFallbackMonitor(int balance)
+    {
+        if (_fallbackDevice is not null)
+        {
+            _sessionFallbackTimer.Change(TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(8));
+            return;
+        }
+
+        _fallbackDevice = _audioDeviceService.GetDefaultOutputDevice();
+        if (_fallbackDevice is null)
+        {
+            return;
+        }
+
+        _sessionCreatedHandler = (_, newSession) =>
+        {
+            var (leftScalar, rightScalar) = GetChannelScalars(_settingsService.Current.Balance);
+            if (TryApplySessionChannelBalance(newSession, leftScalar, rightScalar))
+            {
+                _logService.Info("Applied fallback balance to newly-created audio session.");
+            }
+        };
+
+        _fallbackDevice.AudioSessionManager.OnSessionCreated += _sessionCreatedHandler;
+        _sessionFallbackTimer.Change(TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(8));
+        _logService.Info($"Session fallback monitor started at balance {balance}.");
+    }
+
+    private void StopSessionFallback()
+    {
+        _sessionFallbackActive = false;
+        _sessionFallbackTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+        if (_fallbackDevice is not null && _sessionCreatedHandler is not null)
+        {
+            try
+            {
+                _fallbackDevice.AudioSessionManager.OnSessionCreated -= _sessionCreatedHandler;
+            }
+            catch (Exception ex)
+            {
+                _logService.Error("Failed to unsubscribe from session-created notifications.", ex);
+            }
+        }
+
+        _sessionCreatedHandler = null;
+        _fallbackDevice?.Dispose();
+        _fallbackDevice = null;
+    }
+
     private void ReapplySessionFallback()
     {
         lock (_syncRoot)
@@ -219,12 +366,13 @@ public sealed class BalanceService : IDisposable
                 using var device = _audioDeviceService.GetDefaultOutputDevice();
                 if (device is not null)
                 {
-                    ApplySessionFallbackBalance(device, _settingsService.Current.Balance);
+                    var updated = ApplySessionFallbackBalance(device, _settingsService.Current.Balance);
+                    _logService.Info($"Fallback safety reapply adjusted {updated} session(s).");
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Best-effort fallback reapply for newly-created sessions. User-visible errors come from direct slider/hotkey actions.
+                _logService.Error("Fallback safety reapply failed.", ex);
             }
         }
     }
@@ -241,6 +389,7 @@ public sealed class BalanceService : IDisposable
     public void Dispose()
     {
         _disposed = true;
+        StopSessionFallback();
         _sessionFallbackTimer.Dispose();
     }
 

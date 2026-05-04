@@ -11,9 +11,18 @@ It targets the current default Windows output device. When Windows exposes real 
 - Reset button for `50% / 50%`.
 - Shows the active default output device.
 - Runs from the Windows system tray.
+- Uses a real app/tray icon and Windows application metadata.
+- Uses a Windows app manifest for per-monitor DPI awareness and normal user-level execution.
+- Enforces single-instance behavior. Launching BalanceDock again opens the existing app instead of leaving duplicate tray processes.
+- Minimize and close hide the window to the tray; use Exit from the app or tray menu to quit.
 - Saves the last balance and reapplies it on launch.
 - Watches for output-device changes.
 - Start with Windows option.
+- Device compatibility diagnostics.
+- Configurable hotkeys and hotkey step size.
+- Optional reset-to-center on exit.
+- Local logging under `%LOCALAPPDATA%\BalanceDock\logs\`.
+- Inno Setup installer script.
 - Global hotkeys:
   - `Ctrl + Alt + Left`: move balance left
   - `Ctrl + Alt + Right`: move balance right
@@ -75,7 +84,7 @@ Important: close BalanceDock before rebuilding. If `BalanceDock.exe` is still ru
 Run this from the repo root:
 
 ```powershell
-dotnet publish BalanceDock.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+scripts\publish.ps1
 ```
 
 The EXE will be here:
@@ -102,6 +111,28 @@ If you enable Start with Windows, keep the EXE in the same location. If you move
 
 The portable release build is slower than the fast build because it bundles the .NET runtime into the app output. Use it when you want to share the app with another Windows machine.
 
+## Build Installer
+
+Install Inno Setup, make sure `ISCC.exe` is on your PATH, then run:
+
+```powershell
+scripts\publish.ps1 -Installer
+```
+
+The installer is written to:
+
+```text
+dist\BalanceDockSetup.exe
+```
+
+The installer:
+
+- installs per-user to `%LOCALAPPDATA%\Programs\BalanceDock`
+- creates a Start Menu shortcut
+- optionally creates a Desktop shortcut
+- offers an optional Start with Windows checkbox
+- removes installed app files, settings, logs, and startup registration on uninstall
+
 ## Start Hidden In Tray
 
 ```powershell
@@ -124,11 +155,37 @@ Startup registry entry:
 HKCU\Software\Microsoft\Windows\CurrentVersion\Run\BalanceDock
 ```
 
+Log file:
+
+```text
+%LOCALAPPDATA%\BalanceDock\logs\balancedock.log
+```
+
 ## Build Check
 
 ```powershell
 dotnet build BalanceDock.sln
 ```
+
+## Automated Smoke Test
+
+Run this from the repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test.ps1
+```
+
+This test:
+
+- stops running BalanceDock instances
+- builds Debug
+- builds Release
+- publishes the portable release
+- checks that the EXE and icon are present
+- launches the published app in tray mode
+- verifies the app stays running
+- verifies the log file is created
+- stops the launched app
 
 ## Manual Test Checklist
 
